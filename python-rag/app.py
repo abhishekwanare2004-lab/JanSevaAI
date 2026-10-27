@@ -465,22 +465,30 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("#### ⚡ AI Neural Engine")
     active_key = get_groq_api_key()
-    user_api_key = st.text_input(
-        "Groq API Key (Llama 3.3 70B)",
-        value=active_key,
-        type="password",
-        placeholder="gsk_...",
-        help="Reads from Streamlit Cloud Secrets, .env, or manual input"
-    )
-
-    if user_api_key != active_key:
-        st.session_state["groq_api_key"] = user_api_key.strip()
-        st.rerun()
 
     if active_key:
         st.success("⚡ Llama 3.3 70B Versatile (Active)")
+        st.markdown("""
+        <div style="font-size: 11px; color: #047857; background: #ecfdf5; padding: 6px 10px; border-radius: 6px; border: 1px solid #a7f3d0; margin-bottom: 6px;">
+            🔒 <b>Key Secured:</b> Configured on server & hidden from visitors.
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("⚙️ Change / Override Key"):
+            new_key = st.text_input("Custom Groq Key", type="password", placeholder="gsk_...", key="new_groq_key_input")
+            if st.button("Apply New Key", use_container_width=True):
+                if new_key.strip():
+                    st.session_state["groq_api_key"] = new_key.strip()
+                    st.rerun()
+            if st.session_state.get("groq_api_key"):
+                if st.button("Reset to Server Default", use_container_width=True):
+                    st.session_state.pop("groq_api_key", None)
+                    st.rerun()
     else:
         st.info("🟢 Embedded Knowledge Engine (Active)")
+        custom_key = st.text_input("Enter Groq API Key (Optional)", type="password", placeholder="gsk_...", key="custom_groq_key_input")
+        if custom_key:
+            st.session_state["groq_api_key"] = custom_key.strip()
+            st.rerun()
         st.caption("[🔑 Get Free Groq Key (No Card Needed)](https://console.groq.com/keys)")
 
     # Document OCR Upload
