@@ -2,9 +2,22 @@ import streamlit as st
 import os
 import re
 import json
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 from pypdf import PdfReader
+from dotenv import load_dotenv
 import streamlit.components.v1 as components
+
+# Load environment variables (.env)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+load_dotenv(os.path.join(os.path.dirname(BASE_DIR), ".env"))
+
+# Check Groq SDK availability
+try:
+    from groq import Groq
+    GROQ_AVAILABLE = True
+except ImportError:
+    GROQ_AVAILABLE = False
 
 # ------------------ PAGE CONFIGURATION ------------------
 st.set_page_config(
@@ -86,6 +99,19 @@ html, body, [class*="css"] {
     gap: 8px;
 }
 
+/* Engine Status Tag */
+.engine-tag {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #334155;
+    display: inline-block;
+    margin-top: 4px;
+}
+
 /* Metric Cards */
 .metric-box {
     background: #ffffff;
@@ -132,8 +158,6 @@ html, body, [class*="css"] {
 </style>
 """, unsafe_allow_html=True)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # ------------------ LOAD SCHEMES DATASET ------------------
 dataset_file = os.path.join(BASE_DIR, "government_schemes_dataset.json")
 schemes_data: List[Dict[str, Any]] = []
@@ -177,6 +201,71 @@ STOP_WORDS = {
     "what", "is", "are", "the", "for", "this", "that", "how", "to", "in", "of", "and", "a", "an", "can", "i", "get", "apply", "tell", "me", "about", "needed", "required", "scheme", "yojana",
     "क्या", "है", "हैं", "के", "की", "का", "को", "में", "से", "पर", "और", "लिए", "इस", "इसके", "इसकी", "कैसे", "करें", "प्राप्त", "मिलेगा", "मिलेगी", "योजना"
 }
+
+
+# ------------------ GROQ LLM GENERATION ------------------
+def generate_with_groq(
+    query: str,
+    matched_scheme: Optional[Dict[str, Any]],
+    api_key: str,
+    conversation_history: List[Dict[str, str]],
+    uploaded_context: str = ""
+) -> Optional[str]:
+    """Generates grounded responses using Llama 3.3 70B via Groq API."""
+    if not GROQ_AVAILABLE or not api_key:
+        return None
+
+    try:
+        client = Groq(api_key=api_key)
+
+        context_str = ""
+        portal_url = "https://india.gov.in"
+        if matched_scheme:
+            portal_url = matched_scheme.get("official_website", "https://india.gov.in")
+            context_str = f"""
+OFFICIAL REPOSITORY SCHEME RECORD:
+- Scheme Name: {matched_scheme.get('scheme_name')}
+- Category: {matched_scheme.get('category')}
+- Launched Year: {matched_scheme.get('launched_year')}
+- Target Beneficiary: {matched_scheme.get('target_beneficiary')}
+- Official Portal: {portal_url}
+- Verified Guidelines (Hindi): {matched_scheme.get('answer')}
+- English Summary: {matched_scheme.get('answer_eng')}
+"""
+        if uploaded_context:
+            context_str += f"\nCITIZEN UPLOADED DOCUMENT EXTRACT:\n{uploaded_context}\n"
+
+        system_prompt = f"""You are "JanSeva AI" (जनसेवा सहायक), a Voice-Driven Multimodal Assistant dedicated to helping rural citizens, farmers, women, and unorganized workers understand Indian government schemes and public documentation.
+Academic Project: Capstone Group 82, PCCOE Pune.
+
+GROUND TRUTH GOVERNMENT CONTEXT:
+{context_str if context_str else "Provide general rural welfare guidance across PM-KISAN, PMSBY, PMMVY, Ujjwala, and MGNREGA."}
+
+RULES FOR YOUR RESPONSE:
+1. Explain in clear, polite Hindi with key terms also in English parentheses where helpful.
+2. If the citizen asks for documents (कागजात), provide a clear bullet checklist: Aadhaar card (mobile linked), Bank Passbook (DBT active), land Khasra (if agriculture), Ration card, and photo.
+3. If eligibility (पात्रता) or financial benefit (वित्तीय लाभ) is asked, state specific amounts and DBT direct transfer.
+4. STRICT ANTI-MIDDLEMEN ADVISORY: Emphasize that enrollment is 100% FREE at Gram Panchayat or CSC center. Warn citizens NEVER to pay bribes or cash to unauthorized agents/brokers. Give toll-free helpline 1915 or 155261.
+5. Official source portal: Cite {portal_url}.
+"""
+
+        messages = [{"role": "system", "content": system_prompt}]
+        # Include past 3 conversational turns for multi-turn coreference
+        for m in conversation_history[-4:]:
+            if m.get("role") in ["user", "assistant"]:
+                messages.append({"role": m["role"], "content": m["content"][:350]})
+        messages.append({"role": "user", "content": query})
+
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0.2,
+            max_tokens=850
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        print(f"Groq API Error: {e}")
+        return None
 
 
 # ------------------ CONVERSATIONAL RAG ENGINE ------------------
@@ -240,9 +329,38 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
         st.session_state["active_scheme"] = matched
         scheme_name = matched.get("scheme_name", "सरकारी योजना")
         category = matched.get("category", "जन कल्याण")
+        portal = matched.get("official_website", "https://india.gov.in")
+        citations = [{"source": scheme_name, "section": category, "website": portal}]
+    else:
+        scheme_name = ""
+        citations = [{"source": "National Portal of India", "section": "Public Welfare", "website": "https://india.gov.in"}]
+
+    # Check for Groq API Key
+    groq_api_key = st.session_state.get("groq_api_key", os.getenv("GROQ_API_KEY", "")).strip()
+    uploaded_text = st.session_state.get("uploaded_doc_text", "")
+
+    # Attempt Neural Generation via Groq (Llama 3.3 70B)
+    if groq_api_key and GROQ_AVAILABLE:
+        groq_ans = generate_with_groq(
+            query=query,
+            matched_scheme=matched,
+            api_key=groq_api_key,
+            conversation_history=st.session_state.get("messages", []),
+            uploaded_context=uploaded_text
+        )
+        if groq_ans:
+            context_tag = f"*(⚡ Llama 3.3 70B | संदर्भ: **{scheme_name}**)*\n\n" if is_contextual else "*(⚡ Llama 3.3 70B Response)*\n\n"
+            return {
+                "answer": context_tag + groq_ans,
+                "citations": citations,
+                "scheme_name": scheme_name,
+                "engine": "Llama 3.3 70B"
+            }
+
+    # Embedded Extractive RAG Fallback
+    if matched:
         launch_year = matched.get("launched_year", "N/A")
         beneficiary = matched.get("target_beneficiary", "समस्त पात्र नागरिक")
-        portal = matched.get("official_website", "https://india.gov.in")
 
         is_doc_req = bool(re.search(r"(document|paper|कागजात|दस्तावेज|कागज)", q_lower))
         is_elig_req = bool(re.search(r"(eligib|who can|पात्रता|पात्र|किसे)", q_lower))
@@ -300,12 +418,7 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
                 f"इस योजना का लाभ उठाने हेतु किसी भी एजेंट या दलाल को नकद पैसे न दें। आवेदन आधिकारिक पोर्टल अथवा ग्राम पंचायत में निःशुल्क होता है।"
             )
 
-        citations = [{
-            "source": scheme_name,
-            "section": category,
-            "website": portal
-        }]
-        return {"answer": ans, "citations": citations, "scheme_name": scheme_name}
+        return {"answer": ans, "citations": citations, "scheme_name": scheme_name, "engine": "Embedded RAG"}
 
     # Fallback response
     fallback_ans = (
@@ -322,8 +435,9 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
     )
     return {
         "answer": fallback_ans,
-        "citations": [{"source": "National Portal of India", "section": "Public Welfare", "website": "https://india.gov.in"}],
-        "scheme_name": ""
+        "citations": citations,
+        "scheme_name": "",
+        "engine": "Embedded RAG"
     }
 
 
@@ -331,6 +445,29 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
 with st.sidebar:
     st.markdown("### 🌾 JanSeva AI Controls")
     st.caption("Capstone Project Group 82 | PCCOE Pune")
+
+    # AI Engine Configuration
+    st.markdown("---")
+    st.markdown("#### ⚡ AI Neural Engine")
+    default_key = st.session_state.get("groq_api_key", os.getenv("GROQ_API_KEY", ""))
+    user_api_key = st.text_input(
+        "Groq API Key (Llama 3.3 70B)",
+        value=default_key,
+        type="password",
+        placeholder="gsk_...",
+        help="Get your free key from https://console.groq.com/keys"
+    )
+
+    if user_api_key != default_key:
+        st.session_state["groq_api_key"] = user_api_key.strip()
+        st.rerun()
+
+    active_key = st.session_state.get("groq_api_key", os.getenv("GROQ_API_KEY", "")).strip()
+    if active_key:
+        st.success("⚡ Llama 3.3 70B Versatile (Active)")
+    else:
+        st.info("🟢 Embedded Knowledge Engine (Active)")
+        st.caption("[🔑 Get Free Groq Key (No Card Needed)](https://console.groq.com/keys)")
 
     # Document OCR Upload
     st.markdown("---")
@@ -358,6 +495,8 @@ with st.sidebar:
                 extracted_text_preview = uploaded_file.read().decode("utf-8", errors="ignore")
             except Exception:
                 extracted_text_preview = ""
+
+        st.session_state["uploaded_doc_text"] = extracted_text_preview
 
         lower_preview = (extracted_text_preview + " " + file_name).lower()
         if any(w in lower_preview for w in ["khasra", "khatauni", "land", "farmer", "krishi", "भूमि", "खसरा"]):
