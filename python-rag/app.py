@@ -22,17 +22,24 @@ except ImportError:
 
 def get_groq_api_key() -> str:
     """Retrieve Groq API key with multi-source fallback (UI Session -> Streamlit Cloud Secrets -> .env / OS env)."""
+    key = ""
     # 1. User manual input in UI session state
     if st.session_state.get("groq_api_key"):
-        return st.session_state["groq_api_key"].strip()
+        key = st.session_state["groq_api_key"].strip()
     # 2. Streamlit Cloud Secrets (st.secrets)
-    try:
-        if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
-            return str(st.secrets["GROQ_API_KEY"]).strip()
-    except Exception:
-        pass
+    if not key:
+        try:
+            if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+                key = str(st.secrets["GROQ_API_KEY"]).strip()
+        except Exception:
+            pass
     # 3. Local OS environment or .env
-    return os.getenv("GROQ_API_KEY", "").strip()
+    if not key:
+        key = os.getenv("GROQ_API_KEY", "").strip()
+
+    if key in ["", "PASTE_YOUR_GROQ_API_KEY_HERE", "your_groq_api_key_here"]:
+        return ""
+    return key
 
 # ------------------ PAGE CONFIGURATION ------------------
 st.set_page_config(
