@@ -1,0 +1,142 @@
+{
+  "summary": {
+    "accuracy": 97.5,
+    "accuracy_percent": "97.50%",
+    "f1_score": 0.9743,
+    "f1_percent": "97.43%",
+    "rmsc_rmse": 0.2236,
+    "rmsc_normalized": 0.0224,
+    "retrieval_accuracy": 92.5,
+    "token_qa_f1": 0.9397
+  },
+  "detailed_metrics": {
+    "total_eval_samples": 40,
+    "scheme_retrieval_accuracy": "92.50% (37/40)",
+    "category_classification_accuracy": "97.50% (39/40)",
+    "difficulty_classification_accuracy": "97.50% (39/40)",
+    "category_macro_f1": 0.982,
+    "category_weighted_f1": 0.9743,
+    "token_level_qa_precision": 0.9543,
+    "token_level_qa_recall": 0.9256,
+    "token_level_qa_f1": 0.9397,
+    "temporal_year_rmse_rmsc": 0.2236,
+    "benefit_amount_normalized_rmse": 0,
+    "aggregate_rmsc": 0.0224
+  },
+  "per_category_metrics": {
+    "Technology": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 3
+    },
+    "Women and Child Development": {
+      "precision": 0.75,
+      "recall": 1,
+      "f1": 0.8571,
+      "support": 3
+    },
+    "Energy": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 4
+    },
+    "Manufacturing": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Agriculture": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 7
+    },
+    "Social Welfare": {
+      "precision": 1,
+      "recall": 0.6667,
+      "f1": 0.8,
+      "support": 3
+    },
+    "Business": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Insurance": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 3
+    },
+    "Skill Development": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 2
+    },
+    "Finance": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 2
+    },
+    "Health": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 3
+    },
+    "Employment": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Water and Sanitation": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Housing": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Banking and Finance": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Rural Development": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Urban Employment": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Sanitation": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    },
+    "Education": {
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "support": 1
+    }
+  }
+}

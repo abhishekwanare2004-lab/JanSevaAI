@@ -1,0 +1,22 @@
+{
+  "name": "janseva-ai-rural-governance",
+  "version": "1.0.0",
+  "description": "Voice-Driven Multimodal RAG Assistant for Rural Governance (PCCOE Capstone Group 82)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "genai",
+    "rag",
+    "rural-governance",
+    "voice-assistant",
+    "pccoe"
+  ],
+  "author": "Group 82 (Abhishek Wanare, Shivam Zaware, Shardool Watharkar)",
+  "license": "MIT"
+}

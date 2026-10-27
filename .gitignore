@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.log
+*.zip
+.DS_Store
+Thumbs.db
+GEN AI synopsis_compressed.pdf
+*.pdf
