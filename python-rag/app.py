@@ -2,15 +2,16 @@ import streamlit as st
 import os
 import re
 import json
-from typing import Any, List, Dict, Optional
+import html
+from typing import Any, List, Dict, Optional, Tuple
 from pypdf import PdfReader
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
 
 # Load environment variables (.env)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
-load_dotenv(os.path.join(os.path.dirname(BASE_DIR), ".env"))
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+load_dotenv(os.path.join(os.path.dirname(BASE_DIR), ".env"), override=True)
 
 # Check Groq SDK availability
 try:
@@ -40,6 +41,24 @@ def get_groq_api_key() -> str:
     if key in ["", "PASTE_YOUR_GROQ_API_KEY_HERE", "your_groq_api_key_here"]:
         return ""
     return key
+
+
+def get_groq_model() -> str:
+    """Retrieve Groq model name with multi-source fallback (UI Session -> Streamlit Cloud Secrets -> .env / OS env)."""
+    model = ""
+    if st.session_state.get("sb_groq_model_select"):
+        model = st.session_state["sb_groq_model_select"].strip()
+    elif st.session_state.get("groq_model_name"):
+        model = st.session_state["groq_model_name"].strip()
+    if not model:
+        try:
+            if hasattr(st, "secrets") and "GROQ_MODEL_NAME" in st.secrets:
+                model = str(st.secrets["GROQ_MODEL_NAME"]).strip()
+        except Exception:
+            pass
+    if not model:
+        model = os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile").strip()
+    return model or "llama-3.3-70b-versatile"
 
 # ------------------ PAGE CONFIGURATION ------------------
 st.set_page_config(
@@ -231,11 +250,20 @@ def generate_with_groq(
     matched_scheme: Optional[Dict[str, Any]],
     api_key: str,
     conversation_history: List[Dict[str, str]],
-    uploaded_context: str = ""
-) -> Optional[str]:
-    """Generates grounded responses using Llama 3.3 70B via Groq API."""
-    if not GROQ_AVAILABLE or not api_key:
-        return None
+    uploaded_context: str = "",
+    model_name: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str]]:
+    """Generates grounded responses via Groq API. Returns (response_text, error_message)."""
+    if not GROQ_AVAILABLE:
+        err = "Groq Python SDK (groq) is not installed in the environment."
+        st.session_state["last_groq_error"] = err
+        return None, err
+    if not api_key:
+        err = "No Groq API Key found. (Add GROQ_API_KEY to Streamlit Secrets or sidebar)."
+        st.session_state["last_groq_error"] = err
+        return None, err
+
+    target_model = model_name or get_groq_model()
 
     try:
         client = Groq(api_key=api_key)
@@ -279,15 +307,18 @@ RULES FOR YOUR RESPONSE:
         messages.append({"role": "user", "content": query})
 
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=target_model,
             messages=messages,
             temperature=0.2,
             max_tokens=850
         )
-        return completion.choices[0].message.content
+        st.session_state["last_groq_error"] = None
+        return completion.choices[0].message.content, None
     except Exception as e:
-        print(f"Groq API Error: {e}")
-        return None
+        err_msg = str(e)
+        print(f"Groq API Error ({target_model}): {err_msg}")
+        st.session_state["last_groq_error"] = err_msg
+        return None, err_msg
 
 
 # ------------------ CONVERSATIONAL RAG ENGINE ------------------
@@ -360,24 +391,31 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
     # Check for Groq API Key (from st.secrets, .env, or sidebar input)
     groq_api_key = get_groq_api_key()
     uploaded_text = st.session_state.get("uploaded_doc_text", "")
+    target_model = get_groq_model()
+    groq_error = None
 
-    # Attempt Neural Generation via Groq (Llama 3.3 70B)
+    # Attempt Neural Generation via Groq
     if groq_api_key and GROQ_AVAILABLE:
-        groq_ans = generate_with_groq(
+        groq_ans, groq_error = generate_with_groq(
             query=query,
             matched_scheme=matched,
             api_key=groq_api_key,
             conversation_history=st.session_state.get("messages", []),
-            uploaded_context=uploaded_text
+            uploaded_context=uploaded_text,
+            model_name=target_model
         )
         if groq_ans:
-            context_tag = f"*(⚡ Llama 3.3 70B | संदर्भ: **{scheme_name}**)*\n\n" if is_contextual else "*(⚡ Llama 3.3 70B Response)*\n\n"
+            context_tag = f"*(⚡ {target_model} | संदर्भ: **{scheme_name}**)*\n\n" if is_contextual else f"*(⚡ {target_model} Response)*\n\n"
             return {
                 "answer": context_tag + groq_ans,
                 "citations": citations,
                 "scheme_name": scheme_name,
-                "engine": "Llama 3.3 70B"
+                "engine": f"Groq ({target_model})",
+                "error": None,
+                "fallback_triggered": False
             }
+
+    fallback_triggered = bool(groq_error)
 
     # Embedded Extractive RAG Fallback
     if matched:
@@ -586,7 +624,14 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
                 f"इस योजना का लाभ उठाने हेतु किसी भी एजेंट या दलाल को नकद पैसे न दें। आवेदन आधिकारिक पोर्टल अथवा ग्राम पंचायत में निःशुल्क होता है।"
             )
 
-        return {"answer": ans, "citations": citations, "scheme_name": scheme_name, "engine": "Embedded RAG"}
+        return {
+            "answer": ans,
+            "citations": citations,
+            "scheme_name": scheme_name,
+            "engine": "Embedded RAG (Fallback)" if fallback_triggered else "Embedded RAG",
+            "error": groq_error,
+            "fallback_triggered": fallback_triggered
+        }
 
     # Fallback response
     fallback_ans = (
@@ -605,7 +650,9 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
         "answer": fallback_ans,
         "citations": citations,
         "scheme_name": "",
-        "engine": "Embedded RAG"
+        "engine": "Embedded RAG (Fallback)" if fallback_triggered else "Embedded RAG",
+        "error": groq_error,
+        "fallback_triggered": fallback_triggered
     }
 
 
@@ -618,26 +665,53 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("#### ⚡ AI Neural Engine")
     active_key = get_groq_api_key()
+    current_model = get_groq_model()
 
     if active_key:
-        st.success("⚡ Llama 3.3 70B Versatile (Active)")
+        st.success(f"⚡ Connected: `{current_model}`")
         st.markdown("""
         <div style="font-size: 11px; color: #047857; background: #ecfdf5; padding: 6px 10px; border-radius: 6px; border: 1px solid #a7f3d0; margin-bottom: 6px;">
             🔒 <b>Key Secured:</b> Configured on server & hidden from visitors.
         </div>
         """, unsafe_allow_html=True)
+
+        model_options = [
+            "llama-3.3-70b-versatile",
+            "openai/gpt-oss-20b",
+            "llama-3.1-8b-instant",
+            "qwen/qwen3.8-27b",
+            "openai/gpt-oss-120b"
+        ]
+        if current_model not in model_options:
+            model_options.insert(0, current_model)
+        selected_idx = model_options.index(current_model) if current_model in model_options else 0
+        chosen_model = st.selectbox("Groq Model", model_options, index=selected_idx, key="sb_groq_model_select")
+        if chosen_model != current_model:
+            st.session_state["groq_model_name"] = chosen_model
+            st.rerun()
+
+        if st.session_state.get("last_groq_error"):
+            with st.expander("⚠️ View Last Groq Error Details", expanded=True):
+                st.caption("Last Groq call failed and switched to local engine:")
+                st.code(st.session_state["last_groq_error"], language="text")
+
         with st.expander("⚙️ Change / Override Key"):
             new_key = st.text_input("Custom Groq Key", type="password", placeholder="gsk_...", key="new_groq_key_input")
             if st.button("Apply New Key", use_container_width=True):
                 if new_key.strip():
                     st.session_state["groq_api_key"] = new_key.strip()
+                    st.session_state["last_groq_error"] = None
                     st.rerun()
             if st.session_state.get("groq_api_key"):
                 if st.button("Reset to Server Default", use_container_width=True):
                     st.session_state.pop("groq_api_key", None)
+                    st.session_state["last_groq_error"] = None
                     st.rerun()
     else:
         st.info("🟢 Embedded Knowledge Engine (Active)")
+        if st.session_state.get("last_groq_error"):
+            with st.expander("⚠️ View Last Groq Error Details", expanded=True):
+                st.code(st.session_state["last_groq_error"], language="text")
         custom_key = st.text_input("Enter Groq API Key (Optional)", type="password", placeholder="gsk_...", key="custom_groq_key_input")
         if custom_key:
             st.session_state["groq_api_key"] = custom_key.strip()
@@ -794,6 +868,24 @@ with tab_chat:
     with chat_container:
         for idx, msg in enumerate(st.session_state["messages"]):
             with st.chat_message(msg["role"], avatar="👤" if msg["role"] == "user" else "🌾"):
+                # Display Groq error alert card if fallback was triggered for this message
+                if msg.get("fallback_triggered") and msg.get("error"):
+                    err_escaped = html.escape(str(msg["error"]))
+                    st.markdown(f"""
+                    <div style="background-color: #fff1f2; border: 1px solid #fecdd3; border-left: 5px solid #e11d48; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                            <span style="color: #9f1239; font-weight: 700; font-size: 13px;">⚠️ Groq API Error Encountered</span>
+                            <span style="background: #ffe4e6; color: #be123c; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;">🔄 Switched to Fallback</span>
+                        </div>
+                        <div style="color: #881337; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11.5px; word-break: break-all; background: rgba(255,255,255,0.85); padding: 6px 8px; border-radius: 4px; border: 1px solid #fecdd3;">
+                            {err_escaped}
+                        </div>
+                        <div style="color: #475569; font-size: 11.5px; margin-top: 6px;">
+                            💡 <b>स्थानीय बैकअप इंजन सक्रिय:</b> JanSeva Embedded RAG Engine से उत्तर तैयार किया गया है।
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
                 st.markdown(msg["content"])
                 if msg.get("citations"):
                     for cit in msg["citations"]:
@@ -848,8 +940,13 @@ with tab_chat:
             "role": "assistant",
             "content": res["answer"],
             "citations": res.get("citations", []),
-            "scheme_name": res.get("scheme_name", "")
+            "scheme_name": res.get("scheme_name", ""),
+            "engine": res.get("engine", "Embedded RAG"),
+            "error": res.get("error", None),
+            "fallback_triggered": res.get("fallback_triggered", False)
         })
+        if res.get("fallback_triggered") and res.get("error"):
+            st.toast("⚠️ Groq API Error: Switched to Embedded Fallback Engine", icon="⚠️")
         st.rerun()
 
     # Voice / Audio Read-Aloud Bar for Latest Assistant Message
