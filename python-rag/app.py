@@ -19,6 +19,21 @@ try:
 except ImportError:
     GROQ_AVAILABLE = False
 
+
+def get_groq_api_key() -> str:
+    """Retrieve Groq API key with multi-source fallback (UI Session -> Streamlit Cloud Secrets -> .env / OS env)."""
+    # 1. User manual input in UI session state
+    if st.session_state.get("groq_api_key"):
+        return st.session_state["groq_api_key"].strip()
+    # 2. Streamlit Cloud Secrets (st.secrets)
+    try:
+        if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+            return str(st.secrets["GROQ_API_KEY"]).strip()
+    except Exception:
+        pass
+    # 3. Local OS environment or .env
+    return os.getenv("GROQ_API_KEY", "").strip()
+
 # ------------------ PAGE CONFIGURATION ------------------
 st.set_page_config(
     page_title="JanSeva AI - Rural Governance Assistant",
@@ -335,8 +350,8 @@ def process_rag_query(query: str, domain_filter: str = "All Domains") -> Dict[st
         scheme_name = ""
         citations = [{"source": "National Portal of India", "section": "Public Welfare", "website": "https://india.gov.in"}]
 
-    # Check for Groq API Key
-    groq_api_key = st.session_state.get("groq_api_key", os.getenv("GROQ_API_KEY", "")).strip()
+    # Check for Groq API Key (from st.secrets, .env, or sidebar input)
+    groq_api_key = get_groq_api_key()
     uploaded_text = st.session_state.get("uploaded_doc_text", "")
 
     # Attempt Neural Generation via Groq (Llama 3.3 70B)
@@ -449,20 +464,19 @@ with st.sidebar:
     # AI Engine Configuration
     st.markdown("---")
     st.markdown("#### ⚡ AI Neural Engine")
-    default_key = st.session_state.get("groq_api_key", os.getenv("GROQ_API_KEY", ""))
+    active_key = get_groq_api_key()
     user_api_key = st.text_input(
         "Groq API Key (Llama 3.3 70B)",
-        value=default_key,
+        value=active_key,
         type="password",
         placeholder="gsk_...",
-        help="Get your free key from https://console.groq.com/keys"
+        help="Reads from Streamlit Cloud Secrets, .env, or manual input"
     )
 
-    if user_api_key != default_key:
+    if user_api_key != active_key:
         st.session_state["groq_api_key"] = user_api_key.strip()
         st.rerun()
 
-    active_key = st.session_state.get("groq_api_key", os.getenv("GROQ_API_KEY", "")).strip()
     if active_key:
         st.success("⚡ Llama 3.3 70B Versatile (Active)")
     else:
