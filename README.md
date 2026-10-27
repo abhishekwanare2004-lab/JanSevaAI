@@ -147,6 +147,14 @@ GenAiProject/
 │   ├── evaluate_metrics.py            # Standalone evaluation benchmark script
 │   └── evaluation_metrics.json        # Precomputed benchmarks (Accuracy, F1, RMSC)
 │
+├── python-rag/                        # Full Python LangChain + FAISS + Streamlit RAG
+│   ├── app.py                         # Streamlit multi-tab prototype
+│   ├── backend/                       # FastAPI async server (main.py, run.py)
+│   ├── requirements.txt               # LangChain, FAISS, PyTorch, Transformers
+│   ├── evaluate_metrics.py            # Standalone evaluation benchmark script
+│   ├── government_schemes_dataset.json# 40 verified scheme records
+│   └── README.md                      # Python RAG quickstart
+│
 ├── GOVT-SCHEMES-DATA/                 # Statutory scheme documentation guidelines
 ├── SYNOPSIS_ALIGNMENT_REPORT.md       # Capstone Section 4 & 6 mapping report
 ├── README.md                          # Project documentation and deployment guide
